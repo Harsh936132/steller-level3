@@ -31,27 +31,23 @@ function App() {
 
   const connectWallet = async () => {
     try {
-      // Check if freighter is installed
-      if (!await isConnected()) {
-        alert("Freighter wallet not found! Please install it from freighter.app");
-        return;
+      // Try to connect to real Freighter
+      if (await isConnected()) {
+        const pubKey = await getPublicKey();
+        if (pubKey) {
+          setWallet(pubKey);
+          return;
+        }
       }
       
-      // Request access (standard for Freighter)
-      const pubKey = await getPublicKey();
-      
-      if (pubKey) {
-        setWallet(pubKey);
-      } else {
-        // Some versions of freighter might require requestPermission/requestAccess
-        // For dApp demo fallback:
-        setWallet("G...DEMO_WALLET");
-      }
+      // If not installed or locked, use Demo account
+      console.log("Using Demo Wallet");
+      setWallet("G...DEMO_ACCOUNT");
+      alert("Demo Mode: Connected with testing account.");
     } catch (e) {
       console.error("Wallet error:", e);
-      // Demo fallback for recording if extension is missing
-      setWallet("G...DEMO_WALLET");
-      alert("Note: Connecting with Demo Account (Ensure Freighter is unlocked for real connection)");
+      setWallet("G...DEMO_ACCOUNT");
+      alert("Demo Mode: Connected with testing account.");
     }
   };
 
