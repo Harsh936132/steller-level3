@@ -1,0 +1,130 @@
+#![no_std]
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
+
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
+    Admin,
+    Candidate(Symbol),
+    Voted(Address),
+    Candidates,
+}
+
+#[contract]
+pub struct VotingContract;
+
+#[contractimpl]
+impl VotingContract {
+    pub fn init(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("Already initialized");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        let candidates: Vec<Symbol> = Vec::new(&env);
+        env.storage().instance().set(&DataKey::Candidates, &candidates);
+    }
+
+    pub fn add_candidate(env: Env, name: Symbol) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
+        admin.require_auth();
+
+        let mut candidates: Vec<Symbol> = env.storage().instance().get(&DataKey::Candidates).unwrap();
+        candidates.push_back(name.clone());
+        env.storage().instance().set(&DataKey::Candidates, &candidates);
+        env.storage().instance().set(&DataKey::Candidate(name), &0u32);
+    }
+
+    pub fn vote(env: Env, voter: Address, candidate: Symbol) {
+        voter.require_auth();
+
+        // Check if already voted
+        if env.storage().instance().has(&DataKey::Voted(voter.clone())) {
+            panic!("Already voted");
+        }
+
+        // Check if candidate exists and increment vote
+        let votes: u32 = env.storage().instance().get(&DataKey::Candidate(candidate.clone())).expect("Candidate not found");
+        env.storage().instance().set(&DataKey::Candidate(candidate), &(votes + 1));
+
+        // Mark as voted
+        env.storage().instance().set(&DataKey::Voted(voter), &true);
+    }
+
+    pub fn get_votes(env: Env, candidate: Symbol) -> u32 {
+        env.storage().instance().get(&DataKey::Candidate(candidate)).unwrap_or(0)
+    }
+
+    pub fn list_candidates(env: Env) -> Vec<Symbol> {
+        env.storage().instance().get(&DataKey::Candidates).unwrap_or(Vec::new(&env))
+    }
+}
+
+mod test {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    #[test]
+    fn test_voting_flow() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, VotingContract);
+        let client = VotingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+
+        client.init(&admin);
+
+        let cand1 = symbol_short!("Alice");
+        let cand2 = symbol_short!("Bob");
+
+        // Test 1: Add candidates
+        env.mock_all_auths();
+        client.add_candidate(&cand1);
+        client.add_candidate(&cand2);
+
+        assert_eq!(client.list_candidates(), Vec::from_array(&env, [cand1.clone(), cand2.clone()]));
+
+        // Test 2: Vote
+        client.vote(&voter1, &cand1);
+        assert_eq!(client.get_votes(&cand1), 1);
+
+        client.vote(&voter2, &cand1);
+        assert_eq!(client.get_votes(&cand1), 2);
+
+        // Test 3: List candidates
+        let candidates = client.list_candidates();
+        assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Already voted")]
+    fn test_double_voting() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, VotingContract);
+        let client = VotingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let voter = Address::generate(&env);
+        client.init(&admin);
+
+        let cand1 = symbol_short!("Alice");
+        env.mock_all_auths();
+        client.add_candidate(&cand1);
+
+        client.vote(&voter, &cand1);
+        client.vote(&voter, &cand1); // Should panic
+    }
+
+    #[test]
+    #[should_panic(expected = "Already initialized")]
+    fn test_double_init() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, VotingContract);
+        let client = VotingContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.init(&admin);
+        client.init(&admin); // Should panic
+    }
+}
